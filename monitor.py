@@ -59,11 +59,15 @@ def send_ntfy(title: str, message: str, priority: str = "high") -> None:
         print(f"       Would have sent: {title} — {message}")
         return
     try:
+        import base64
+        # RFC 2047 base64 encoding to support unicode/emojis in HTTP headers
+        encoded_title = "=?utf-8?B?" + base64.b64encode(title.encode("utf-8")).decode("utf-8") + "?="
+
         requests.post(
             f"https://ntfy.sh/{NTFY_TOPIC}",
             data=message.encode("utf-8"),
             headers={
-                "Title": title,
+                "Title": encoded_title,
                 "Priority": priority,
                 "Tags": "movie_camera,bell",
             },
