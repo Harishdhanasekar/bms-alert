@@ -25,6 +25,11 @@ from playwright.sync_api import sync_playwright
 MOVIE_NAME = "Jana Nayagan"
 CITY_SLUG = "chennai"          # BookMyShow's URL slug for the city
 
+# OPTIONAL: Set this to a direct BookMyShow "buytickets" URL (including a specific date)
+# if you want to skip the auto-search explore page and target a specific date directly.
+# Leave it empty ("") to automatically search the explore page.
+DIRECT_URL = "https://in.bookmyshow.com/movies/chennai/jana-nayagan/buytickets/ET00430817/20260723"
+
 # Leave THEATER_KEYWORDS empty ( [] ) to get alerted the moment ANY theater
 # in the city opens booking for this movie. Add substrings (case-insensitive)
 # to restrict alerts to specific theaters, e.g.:
@@ -94,7 +99,7 @@ def get_theaters_with_shows(page, movie_url: str) -> list[str]:
     Returns a list of theater/venue names that currently have showtimes.
     """
     page.goto(movie_url, timeout=45000, wait_until="domcontentloaded")
-    page.wait_for_timeout(3000)
+    page.wait_for_timeout(5000)
 
     # If there's a "Book tickets" CTA, click it — BMS often needs this to
     # reveal the date/venue picker rather than just a synopsis page.
@@ -106,27 +111,55 @@ def get_theaters_with_shows(page, movie_url: str) -> list[str]:
     except Exception:
         pass
 
-    # Venue names on BMS venue-listing pages are typically inside elements
-    # with class names containing "venue" — this selector is intentionally
-    # broad since BMS changes its markup periodically.
-    venue_texts = page.eval_on_selector_all(
-        "[class*='venue' i], [class*='Venue' i]",
-        "els => els.map(e => e.innerText).filter(Boolean)",
-    )
-
-    # Clean and dedupe short venue-name-looking strings
-    theaters = []
-    seen = set()
-    for t in venue_texts:
-        name = t.strip().split("\n")[0].strip()
-        if 3 < len(name) < 80 and name not in seen:
-            seen.add(name)
-            theaters.append(name)
+    # Extract theater names using robust and multi-strategy extraction selectors:
+    # 1. Target the elements enclosing '/cinemas/' and '/buytickets/' links
+    # 2. Fall back to elements with class names containing "venue"
+    theaters = page.evaluate("""() => {
+        const results = [];
+        
+        // Strategy 1: Find theater rows via their buy ticket link
+        const links = document.querySelectorAll("a[href*='/cinemas/'][href*='/buytickets/']");
+        for (const link of links) {
+            let name = "";
+            if (link.parentElement && link.parentElement.parentElement) {
+                name = link.parentElement.parentElement.innerText.trim();
+            }
+            if (!name) {
+                const parts = link.href.split('/');
+                if (parts.length > 5) {
+                    name = parts[5].replace(/-/g, ' ').replace(/\\b\\w/g, c => c.toUpperCase());
+                }
+            }
+            if (name) {
+                name = name.split('\\n')[0].trim();
+                if (name && name.length > 3 && name.length < 80 && !results.includes(name)) {
+                    results.push(name);
+                }
+            }
+        }
+        
+        // Strategy 2: Fall back to element class names containing 'venue'
+        const venues = document.querySelectorAll("[class*='venue' i], [class*='Venue' i]");
+        for (const el of venues) {
+            let name = el.innerText || "";
+            name = name.trim().split('\\n')[0].trim();
+            if (name && name.length > 3 && name.length < 80 && !results.includes(name)) {
+                results.push(name);
+            }
+        }
+        
+        return results;
+    }""")
 
     return theaters
 
 
 def main():
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
+
     state = load_state()
 
     with sync_playwright() as p:
@@ -140,24 +173,28 @@ def main():
         )
         page = context.new_page()
 
-        try:
-            movie_url = find_movie_url(page)
-        except Exception as e:
-            print(f"[ERROR] Could not load movie listing page: {e}")
-            browser.close()
-            sys.exit(1)
+        if DIRECT_URL:
+            movie_url = DIRECT_URL
+            print(f"[INFO] Using direct showtimes URL: {movie_url}")
+        else:
+            try:
+                movie_url = find_movie_url(page)
+            except Exception as e:
+                print(f"[ERROR] Could not load movie listing page: {e}")
+                browser.close()
+                sys.exit(1)
 
-        if not movie_url:
-            print(f"[INFO] '{MOVIE_NAME}' not yet listed in {CITY_SLUG}. Will keep checking.")
-            browser.close()
-            return
+            if not movie_url:
+                print(f"[INFO] '{MOVIE_NAME}' not yet listed in {CITY_SLUG}. Will keep checking.")
+                browser.close()
+                return
 
-        if not state["movie_found"]:
-            state["movie_found"] = True
-            send_ntfy(
-                f"{MOVIE_NAME} is now listed!",
-                f"{MOVIE_NAME} has appeared on BookMyShow {CITY_SLUG.title()}. Checking for showtimes...",
-            )
+            if not state["movie_found"]:
+                state["movie_found"] = True
+                send_ntfy(
+                    f"{MOVIE_NAME} is now listed!",
+                    f"{MOVIE_NAME} has appeared on BookMyShow {CITY_SLUG.title()}. Checking for showtimes...",
+                )
 
         try:
             theaters = get_theaters_with_shows(page, movie_url)
