@@ -36,7 +36,7 @@ DIRECT_URL = "https://in.bookmyshow.com/movies/chennai/jana-nayagan/buytickets/E
 # THEATER_KEYWORDS = ["Sathyam", "Rohini", "Luxe"]
 THEATER_KEYWORDS = []
 
-NTFY_TOPIC = os.environ.get("NTFY_TOPIC", "").strip()
+NTFY_TOPIC = os.environ.get("NTFY_TOPIC", "harish-movie-alerts-2002").strip()
 STATE_FILE = Path(__file__).parent / "state.json"
 
 MOVIES_LISTING_URL = f"https://in.bookmyshow.com/explore/movies-{CITY_SLUG}"
