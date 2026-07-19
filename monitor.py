@@ -102,8 +102,19 @@ def get_theaters_with_shows(page, movie_url: str) -> list[str]:
     Visit the movie page and try to reach the 'buy tickets' venue list.
     Returns a list of theater/venue names that currently have showtimes.
     """
-    page.goto(movie_url, timeout=45000, wait_until="domcontentloaded")
+    response = page.goto(movie_url, timeout=45000, wait_until="domcontentloaded")
     page.wait_for_timeout(5000)
+
+    try:
+        status = response.status if response else "Unknown"
+        title = page.title()
+        print(f"[DEBUG] Loaded page status: {status}, title: '{title}'")
+        body_text = page.locator("body").inner_text()
+        print(f"[DEBUG] Body text length: {len(body_text)}")
+        if len(body_text) < 1500:
+            print("[DEBUG] Body snippet:", body_text[:1000])
+    except Exception as e:
+        print(f"[DEBUG] Failed to gather page debug info: {e}")
 
     # If there's a "Book tickets" CTA, click it — BMS often needs this to
     # reveal the date/venue picker rather than just a synopsis page.
